@@ -17,6 +17,10 @@ _pause_event = Event()
 _pause_event.set()  # start unpaused
 _pause_lock = Lock()
 
+# Global cache for ubigeo_distrito when coverage is 100%
+_ubigeo_cache = {}
+_cache_lock = Lock()
+
 def _pause_all(seconds=30):
     with _pause_lock:
         if not _pause_event.is_set():
@@ -62,6 +66,12 @@ def load_totales(ubigeo_distrito):
 
 def fetch(ubigeo_distrito):
 
+    # Check cache, return immediately if present
+    with _cache_lock:
+        if ubigeo_distrito in _ubigeo_cache:
+            print(f"cache hit {ubigeo_distrito}")
+            return _ubigeo_cache[ubigeo_distrito]
+
     totales = load_totales(ubigeo_distrito)
     candidatos = load_participantes(ubigeo_distrito)
 
@@ -76,10 +86,26 @@ def fetch(ubigeo_distrito):
     suma_votos_validos = sum(candidatos.values())
     candidatos["VOTOS EN BLANCO"] = max(0, votos_emitidos - suma_votos_validos)
 
-    return {
+    # Get porcentajes to decide if we should cache
+    porcentaje = totales.get("pendientesJee")
+    # Normalize percentage as float, compare to 100, and decide whether to cache
+    cache_it = False
+    try:
+        if porcentaje is not None and float(porcentaje) == 0.0:
+            cache_it = True
+    except Exception:
+        cache_it = False
+
+    result = {
         "ubigeo_distrito": ubigeo_distrito,
         "pendientesJee": totales.get("pendientesJee", 0),
         "votosEmitidos": votos_emitidos,
         "votosRestantes": votos_restantes,
         "candidatos": candidatos,
     }
+
+    if cache_it:
+        with _cache_lock:
+            _ubigeo_cache[ubigeo_distrito] = result
+
+    return result
