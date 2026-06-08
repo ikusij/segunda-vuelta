@@ -70,4 +70,4 @@ if __name__ == "__main__":
             
             prev_timestamp = timestamp
 
-        sleep(60)
+        sleep(450)
