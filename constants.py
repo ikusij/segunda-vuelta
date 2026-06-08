@@ -1,0 +1,16 @@
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "es-PE,es;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://resultadoelectoral.onpe.gob.pe/",
+    "Origin": "https://resultadoelectoral.onpe.gob.pe",
+    "Connection": "keep-alive",
+    "sec-ch-ua": '"Chromium";v="125", "Not-A.Brand";v="99", "Google Chrome";v="125"',
+    "sec-ch-ua-platform": '"Windows"',
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Cookie": "_ga_S91LMCFR6G=GS2.1.s1776646897$o2$g0$t1776647368$j60$l0$h438155327; _clck=6irwt3%5E2%5Eg5j%5E0%5E2288; _ga_7GJZHZKMC1=GS2.1.s1777246104$o1$g1$t1777247812$j25$l0$h0; _ga=GA1.1.1273837598.1775585178; cf_clearance=cRIUiHLzP3GABoovO7sQ40BffI6ynGMT1b3VWODINPk-1778372459-1.2.1.1-wzu_y6rLuH7vz4RH7w6iG32nahhj4dmV0P6wWDbiMYRJ9akx81vC4obiC3AlNGb.4F7tDldADkp8VqEGxQ2m2JjdwxZ70hCg9oKewe9fD5bwuMHAKiGidwaQsIQcLF8ocEZzDeXDMfoE4rYMmEqW8QQVfgc4oHAt6j3sjnvDsVM6wMv8GZrOUXgRBk_TqJ0LyCfrAINsscZFwEdtUcwTeh3OwvjCfVfl9XeK.36TAqGJj_qf.cw2TCclidQPYgAzkvBHWt1mUrejmL9nZgZQ4TRjj2n9LJekM5TBBtA3oHZ7z__tepfDpv6EY4VwowMtsaou2zhtlF5mN8mzD5q6VA; _ga_7X9XC2V582=GS2.1.s1780842011$o145$g1$t1780851259$j60$l0$h1856305019",
+}
