@@ -61,7 +61,6 @@ if __name__ == "__main__":
 
         if prev_timestamp is None or timestamp != prev_timestamp:
             fetch_all()
-            run_national_simulation()
             prev_timestamp = timestamp
 
         sleep(60)
