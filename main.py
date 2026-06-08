@@ -52,8 +52,6 @@ if __name__ == "__main__":
     prev_timestamp = None
 
     while True:
-
-        sleep(450)
         
         timestamp = heartbeat()
 
@@ -71,3 +69,6 @@ if __name__ == "__main__":
                 print(f"Git error: {e}")
             
             prev_timestamp = timestamp
+
+        sleep(300)
+        
