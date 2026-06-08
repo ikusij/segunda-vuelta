@@ -7,8 +7,7 @@ from monte_carlo import (
     MonteCarloConfig,
     aggregate_province,
     make_synthetic_result,
-    monte_carlo_simulation,
-    print_results,
+    monte_carlo_simulation
 )
 
 TIMESERIES_FILE = "timeseries.csv"
@@ -21,7 +20,6 @@ def run_national_simulation(
     confidence_level: float = 0.95,
     random_seed: int | None = None,
     votes_per_acta: int = 220,
-    top_n: int = 4,
     timestamp: datetime | None = None,
     save_timeseries: bool = True,
 ):
@@ -75,8 +73,6 @@ def run_national_simulation(
     print(f"\nAggregating {len(all_results)} results ({len(synthetic_results)} synthetic)...")
     national = aggregate_province(all_results)
 
-    print_results(national, top_n=top_n)
-
     if timestamp and save_timeseries:
         ts_str = timestamp.strftime("%Y-%m-%d %H:%M")
         write_header = not os.path.exists(TIMESERIES_FILE)
@@ -94,4 +90,24 @@ def run_national_simulation(
                 })
         print(f"\nSaved snapshot '{ts_str}' → {TIMESERIES_FILE}")
 
-    return national
+    # Always order so that KEIKO goes first, then SANCHEZ, then others.
+    def candidate_priority(c):
+        name = c.name.upper()
+        if "KEIKO" in name:
+            return 0
+        if "SANCHEZ" in name:
+            return 1
+        return 2
+
+    # Get top 2: KEIKO, SANCHEZ, then others by projected votes. Flatten [projected_votes, votes_counted] for each.
+    return [
+        item
+        for c in sorted(
+            national.candidates,
+            key=lambda c: (candidate_priority(c), -(c.projected_share * national.total_votes))
+        )[:2]
+        for item in (int(c.projected_share * national.total_votes), c.votes_counted)
+    ]
+
+if __name__ == "__main__":
+    print(run_national_simulation(timestamp=datetime.strptime("2026-05-07 20:00", "%Y-%m-%d %H:%M")))

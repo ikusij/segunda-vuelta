@@ -2,6 +2,8 @@ from fetch_all import fetch_all
 from datetime import datetime
 from time import sleep
 import requests
+import subprocess
+
 
 from tweet import create_tweet
 from run_simulation import run_national_simulation
@@ -18,20 +20,14 @@ def timestamp_to_words(timestamp):
     """
 
     dt = datetime.fromtimestamp(timestamp)
-    
-    meses = [
-        "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
-        "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
-   
-    ]
 
     day = f"{dt.day:02d}"
-    month = meses[dt.month - 1]
+    month = dt.month
     year = dt.year
     hour = dt.strftime("%H:%M")
     
-    if hora.startswith('0'):
-        hora = hora[1:]
+    if hour.startswith('0'):
+        hour = hour[1:]
     
     return f"{year}-{month}-{day} {hour}"
 
@@ -60,7 +56,18 @@ if __name__ == "__main__":
         timestamp = heartbeat()
 
         if prev_timestamp is None or timestamp != prev_timestamp:
+            
             fetch_all()
+            fp_est, fp_cont, jp_est, jp_cont = run_national_simulation(timestamp=datetime.strptime(timestamp_to_words(timestamp), "%Y-%m-%d %H:%M"))
+            create_tweet(datetime.strptime(timestamp_to_words(timestamp), "%Y-%m-%d %H:%M"), fp_cont, jp_cont, fp_est, jp_est)
+
+            try:
+                subprocess.run(["git", "add", "."], check=True)
+                subprocess.run(["git", "commit", "-m", "Automated commit"], check=True)
+                subprocess.run(["git", "push"], check=True)
+            except subprocess.CalledProcessError as e:
+                print(f"Git error: {e}")
+            
             prev_timestamp = timestamp
 
         sleep(60)
