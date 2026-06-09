@@ -14,7 +14,12 @@ from monte_carlo import (
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-TODOS = "— Todos —"
+TODOS_OPTS = {
+    "PERU_Y_EXTRANJERO": "— Todos (Perú + Extranjero) —",
+    "PERU_SOLO":          "— Solo Perú —",
+    "EXTRANJERO_SOLO":    "— Solo Extranjero —",
+}
+TODOS = TODOS_OPTS["PERU_Y_EXTRANJERO"]  # default variable for backcompat
 TIMESERIES_FILE = "timeseries.csv"
 CACHE_TTL = 1800
 
@@ -269,6 +274,15 @@ active_tab = st.sidebar.radio(
 )
 st.sidebar.markdown("---")
 
+# Helper: detect perú sololista, extranjero only, or mixed
+def is_peruvian_dept(dept_name):
+    return any(
+        dept_name.upper() == pdname or dept_name.title() == pdname
+        for pdname in PERU_DEPARTMENTS
+    )
+
+extranjero_depts = [d for d in hierarchy.keys() if not is_peruvian_dept(d)]
+peruvian_deps   = [d for d in sorted(hierarchy.keys()) if is_peruvian_dept(d)]
 
 # ── Tab: Monte Carlo ─────────────────────────────────────────────────────────
 
@@ -282,38 +296,60 @@ if active_tab == "Simulación Monte Carlo":
         help="Número estimado de votos por acta. Se usa para calcular votos pendientes en distritos sin datos.",
     )
 
-    col_dep, col_prov, col_dist = st.columns(3)
+    col_todos, col_dep, col_prov, col_dist = st.columns([2, 3, 3, 3])
 
-    # FILTRO PERÚ: solo departamentos de PERÚ, excluyendo agrupaciones/continentes
-    peruvian_deps = [d for d in sorted(hierarchy.keys()) if any(
-        d.upper() == pdname or d.title() == pdname for pdname in PERU_DEPARTMENTS
-    )]
+    # NUEVO SELECTOR de TODOS
+    with col_todos:
+        todos_choice = st.selectbox(
+            "Ámbito",
+            [
+                TODOS_OPTS["PERU_Y_EXTRANJERO"],
+                TODOS_OPTS["PERU_SOLO"],
+                TODOS_OPTS["EXTRANJERO_SOLO"],
+            ],
+            help="Elija si desea simular votos nacionales, solo Perú, o solo extranjero.",
+            key="todos_choice"
+        )
 
     with col_dep:
+        # La lista de departamentos depende de todos_choice
+        if todos_choice == TODOS_OPTS["PERU_Y_EXTRANJERO"]:
+            available_deps = sorted(hierarchy.keys())
+        elif todos_choice == TODOS_OPTS["PERU_SOLO"]:
+            available_deps = peruvian_deps
+        elif todos_choice == TODOS_OPTS["EXTRANJERO_SOLO"]:
+            available_deps = sorted(extranjero_depts)
+        else:
+            available_deps = sorted(hierarchy.keys())
         dept_sel = st.selectbox(
             "Departamento",
-            [TODOS] + peruvian_deps,
-            help="Solo departamentos ubicados en Perú.",
+            [TODOS] + available_deps,
+            help={
+                TODOS_OPTS["PERU_Y_EXTRANJERO"]:  "Departamentos ubicados en Perú y agrupaciones tipo extranjero.",
+                TODOS_OPTS["PERU_SOLO"]:          "Solo departamentos ubicados en Perú.",
+                TODOS_OPTS["EXTRANJERO_SOLO"]:    "Solo agrupaciones o zonas del extranjero.",
+            }[todos_choice],
+            key="dept_sel"
         )
 
     with col_prov:
         if dept_sel == TODOS:
-            st.selectbox("Provincia", [TODOS], disabled=True)
+            st.selectbox("Provincia", [TODOS], disabled=True, key="prov_sel_disabled")
             prov_sel = TODOS
         else:
-            prov_sel = st.selectbox("Provincia", [TODOS] + sorted(hierarchy[dept_sel].keys()))
+            prov_sel = st.selectbox("Provincia", [TODOS] + sorted(hierarchy[dept_sel].keys()), key="prov_sel")
 
     with col_dist:
         if prov_sel == TODOS:
-            st.selectbox("Distrito", [TODOS], disabled=True)
+            st.selectbox("Distrito", [TODOS], disabled=True, key="dist_sel_disabled")
             dist_sel, dist_ubigeo = TODOS, None
         else:
             pairs = hierarchy[dept_sel][prov_sel]
-            dist_sel = st.selectbox("Distrito", [TODOS] + [name for name, _ in pairs])
+            dist_sel = st.selectbox("Distrito", [TODOS] + [name for name, _ in pairs], key="dist_sel")
             dist_ubigeo = next((uid for name, uid in pairs if name == dist_sel), None)
 
     if st.button("Ejecutar simulación", key="run_sim"):
-        # Resolve ubigeos from selection
+        # Resolve ubigeos from selection based on TODOS selector
         if dist_sel != TODOS and dist_ubigeo:
             ids = [dist_ubigeo]
         elif prov_sel != TODOS:
@@ -321,25 +357,58 @@ if active_tab == "Simulación Monte Carlo":
         elif dept_sel != TODOS:
             ids = [uid for pairs in hierarchy[dept_sel].values() for _, uid in pairs]
         else:
-            # Solo departamentos de Perú incluidos
-            ids = [
-                uid
-                for dept_name, dept_provs in hierarchy.items()
-                if dept_name in peruvian_deps
-                for prov_name, pairs in dept_provs.items()
-                for _, uid in pairs
-            ]
+            # Todos a nivel nacional, perú, o extranjero según todos_choice
+            if todos_choice == TODOS_OPTS["PERU_Y_EXTRANJERO"]:
+                # Nacional: todo el hierarchy
+                ids = [
+                    uid
+                    for dept_name, dept_provs in hierarchy.items()
+                    for prov_name, pairs in dept_provs.items()
+                    for _, uid in pairs
+                ]
+            elif todos_choice == TODOS_OPTS["PERU_SOLO"]:
+                # Perú solo, solo departamentos peruanos
+                ids = [
+                    uid
+                    for dept_name, dept_provs in hierarchy.items()
+                    if dept_name in peruvian_deps
+                    for prov_name, pairs in dept_provs.items()
+                    for _, uid in pairs
+                ]
+            elif todos_choice == TODOS_OPTS["EXTRANJERO_SOLO"]:
+                # Extranjero solo, solo agrupaciones no-perú
+                ids = [
+                    uid
+                    for dept_name, dept_provs in hierarchy.items()
+                    if dept_name in extranjero_depts
+                    for prov_name, pairs in dept_provs.items()
+                    for _, uid in pairs
+                ]
+            else:
+                # Backcompatible national
+                ids = [
+                    uid
+                    for dept_name, dept_provs in hierarchy.items()
+                    for prov_name, pairs in dept_provs.items()
+                    for _, uid in pairs
+                ]
 
         if not ids:
             st.error("No se encontraron ubigeos para esta selección.")
             st.stop()
 
-        zone_label = (
-            dist_sel if dist_sel != TODOS else
-            prov_sel if prov_sel != TODOS else
-            dept_sel if dept_sel != TODOS else
-            "Nacional"
-        )
+        # ZONE LABEL REFLECTS SCOPE
+        if dept_sel != TODOS:
+            zone_label = dept_sel
+        elif todos_choice == TODOS_OPTS["PERU_Y_EXTRANJERO"]:
+            zone_label = "Nacional (Perú+Extranjero)"
+        elif todos_choice == TODOS_OPTS["PERU_SOLO"]:
+            zone_label = "Sólo Perú"
+        elif todos_choice == TODOS_OPTS["EXTRANJERO_SOLO"]:
+            zone_label = "Extranjero"
+        else:
+            zone_label = "Nacional"
+
         geo_grouping = (
             "none"       if dist_sel != TODOS else
             "district"   if prov_sel != TODOS else
@@ -386,12 +455,11 @@ if active_tab == "Simulación Monte Carlo":
 
         rows = []
         for c in result.candidates:
-            
             if c.name not in DISPLAY_CANDIDATES:
                 continue
-            
+
             proj_votes = int(c.projected_share * result.total_votes)
-            
+
             rows.append({
                 "Candidato":                c.name,
                 "Votos contabilizados":     c.votes_counted,
@@ -430,7 +498,7 @@ if active_tab == "Simulación Monte Carlo":
                         .format({col: "{:,}"   for col in int_b}),
                     use_container_width=True,
                 )
-        
+
         if estimated:
             with st.expander(f"Distritos estimados con distribución provincial ({len(estimated)})"):
                 st.write(
