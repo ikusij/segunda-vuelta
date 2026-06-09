@@ -18,6 +18,15 @@ TODOS = "— Todos —"
 TIMESERIES_FILE = "timeseries.csv"
 CACHE_TTL = 1800
 
+# Departamentos del Perú (fuente: INEI/ONPE) — EXCLUYE continentes/agrupaciones internacionales
+PERU_DEPARTMENTS = [
+    'AMAZONAS', 'ANCASH', 'APURÍMAC', 'APURIMAC', 'AREQUIPA', 'AYACUCHO', 'CAJAMARCA', 'CALLAO',
+    'CUSCO', 'HUANCAVELICA', 'HUÁNUCO', 'HUANUCO', 'ICA', 'JUNÍN', 'JUNIN', 'LA LIBERTAD',
+    'LAMBAYEQUE', 'LIMA', 'LORETO', 'MADRE DE DIOS', 'MOQUEGUA', 'PASCO', 'PIURA', 'PUNO',
+    'SAN MARTÍN', 'SAN MARTIN', 'TACNA', 'TUMBES', 'UCAYALI'
+]
+# Se usan variantes con y sin tilde para máxima tolerancia a fuentes mixtas
+
 # ── Data loaders ─────────────────────────────────────────────────────────────
 
 @st.cache_data(show_spinner=False, ttl=CACHE_TTL)
@@ -275,8 +284,17 @@ if active_tab == "Simulación Monte Carlo":
 
     col_dep, col_prov, col_dist = st.columns(3)
 
+    # FILTRO PERÚ: solo departamentos de PERÚ, excluyendo agrupaciones/continentes
+    peruvian_deps = [d for d in sorted(hierarchy.keys()) if any(
+        d.upper() == pdname or d.title() == pdname for pdname in PERU_DEPARTMENTS
+    )]
+
     with col_dep:
-        dept_sel = st.selectbox("Departamento", [TODOS] + sorted(hierarchy.keys()))
+        dept_sel = st.selectbox(
+            "Departamento",
+            [TODOS] + peruvian_deps,
+            help="Solo departamentos ubicados en Perú.",
+        )
 
     with col_prov:
         if dept_sel == TODOS:
@@ -303,7 +321,14 @@ if active_tab == "Simulación Monte Carlo":
         elif dept_sel != TODOS:
             ids = [uid for pairs in hierarchy[dept_sel].values() for _, uid in pairs]
         else:
-            ids = [uid for dept_provs in hierarchy.values() for pairs in dept_provs.values() for _, uid in pairs]
+            # Solo departamentos de Perú incluidos
+            ids = [
+                uid
+                for dept_name, dept_provs in hierarchy.items()
+                if dept_name in peruvian_deps
+                for prov_name, pairs in dept_provs.items()
+                for _, uid in pairs
+            ]
 
         if not ids:
             st.error("No se encontraron ubigeos para esta selección.")
