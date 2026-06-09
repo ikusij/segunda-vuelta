@@ -1,5 +1,6 @@
 import json
 import os
+import unicodedata
 
 import altair as alt
 import pandas as pd
@@ -14,23 +15,42 @@ from monte_carlo import (
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-TODOS_OPTS = {
-    "PERU_Y_EXTRANJERO": "— Todos (Perú + Extranjero) —",
-    "PERU_SOLO":          "— Solo Perú —",
-    "EXTRANJERO_SOLO":    "— Solo Extranjero —",
-}
-TODOS = TODOS_OPTS["PERU_Y_EXTRANJERO"]  # default variable for backcompat
+# Sentinel used in selectboxes to mean "all items at this level"
+ALL_SENTINEL = "— Todos —"
+
+AMBITO_PERU       = "Perú"
+AMBITO_EXTRANJERO = "Extranjero"
+AMBITO_TODOS      = "Todos (Perú + Extranjero)"
+AMBITO_OPTIONS    = [AMBITO_TODOS, AMBITO_PERU, AMBITO_EXTRANJERO]
+
 TIMESERIES_FILE = "timeseries.csv"
 CACHE_TTL = 1800
 
-# Departamentos del Perú (fuente: INEI/ONPE) — EXCLUYE continentes/agrupaciones internacionales
-PERU_DEPARTMENTS = [
-    'AMAZONAS', 'ANCASH', 'APURÍMAC', 'APURIMAC', 'AREQUIPA', 'AYACUCHO', 'CAJAMARCA', 'CALLAO',
-    'CUSCO', 'HUANCAVELICA', 'HUÁNUCO', 'HUANUCO', 'ICA', 'JUNÍN', 'JUNIN', 'LA LIBERTAD',
-    'LAMBAYEQUE', 'LIMA', 'LORETO', 'MADRE DE DIOS', 'MOQUEGUA', 'PASCO', 'PIURA', 'PUNO',
-    'SAN MARTÍN', 'SAN MARTIN', 'TACNA', 'TUMBES', 'UCAYALI'
+# Departamentos del Perú (INEI/ONPE) — normalised to uppercase without accents
+# for robust matching against data sources that may or may not carry tildes.
+_PERU_DEPARTMENTS_RAW = [
+    "AMAZONAS", "ANCASH", "APURÍMAC", "AREQUIPA", "AYACUCHO", "CAJAMARCA",
+    "CALLAO", "CUSCO", "HUANCAVELICA", "HUÁNUCO", "ICA", "JUNÍN",
+    "LA LIBERTAD", "LAMBAYEQUE", "LIMA", "LORETO", "MADRE DE DIOS",
+    "MOQUEGUA", "PASCO", "PIURA", "PUNO", "SAN MARTÍN", "TACNA",
+    "TUMBES", "UCAYALI",
 ]
-# Se usan variantes con y sin tilde para máxima tolerancia a fuentes mixtas
+
+
+def _normalize(text: str) -> str:
+    """Uppercase + strip accents for fuzzy department matching."""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", text.upper())
+        if unicodedata.category(c) != "Mn"
+    )
+
+
+_PERU_DEPT_NORMALIZED = {_normalize(d) for d in _PERU_DEPARTMENTS_RAW}
+
+
+def is_peruvian_dept(dept_name: str) -> bool:
+    return _normalize(dept_name) in _PERU_DEPT_NORMALIZED
+
 
 # ── Data loaders ─────────────────────────────────────────────────────────────
 
@@ -78,8 +98,8 @@ def load_null_votes_data(bundle: dict) -> pd.DataFrame:
     ubigeo_to_geo: dict[str, dict] = {
         str(dist["ubigeo"]): {
             "Departamento": dept["nombre"],
-            "Provincia": prov["nombre"],
-            "Distrito": dist["nombre"],
+            "Provincia":    prov["nombre"],
+            "Distrito":     dist["nombre"],
         }
         for dept in output
         for prov in dept.get("provincias", [])
@@ -96,16 +116,18 @@ def load_null_votes_data(bundle: dict) -> pd.DataFrame:
         nulos = candidatos.get("VOTOS NULOS", 0)
         valid = {k: v for k, v in candidatos.items() if k not in excluded}
         leader = max(valid, key=valid.get) if valid else "—"
-        geo = ubigeo_to_geo.get(ubigeo, {"Departamento": "—", "Provincia": "—", "Distrito": ubigeo})
+        geo = ubigeo_to_geo.get(
+            ubigeo, {"Departamento": "—", "Provincia": "—", "Distrito": ubigeo}
+        )
         rows.append({
-            "Departamento": geo["Departamento"],
-            "Provincia": geo["Provincia"],
-            "Distrito": geo["Distrito"],
-            "Ubigeo": ubigeo,
+            "Departamento":  geo["Departamento"],
+            "Provincia":     geo["Provincia"],
+            "Distrito":      geo["Distrito"],
+            "Ubigeo":        ubigeo,
             "Votos emitidos": emitidos,
-            "Votos nulos": nulos,
-            "% nulos": nulos / emitidos * 100,
-            "Líder": leader,
+            "Votos nulos":   nulos,
+            "% nulos":       nulos / emitidos * 100,
+            "Líder":         leader,
         })
 
     return pd.DataFrame(rows)
@@ -118,7 +140,10 @@ def skip_reason(d: dict) -> str:
         return "Sin votos contabilizados"
     cand_sum = sum(v for k, v in d["candidatos"].items() if k != "VOTOS EN BLANCO")
     if abs(cand_sum - d["votosEmitidos"]) > d["votosEmitidos"] * 0.05:
-        return f"Datos inconsistentes (candidatos: {cand_sum:,} vs emitidos: {d['votosEmitidos']:,})"
+        return (
+            f"Datos inconsistentes "
+            f"(candidatos: {cand_sum:,} vs emitidos: {d['votosEmitidos']:,})"
+        )
     return "Desconocido"
 
 
@@ -168,7 +193,7 @@ def run_simulation(
         province_valid.setdefault(uid[:4], []).append(r)
         department_valid.setdefault(uid[:2], []).append(r)
 
-    province_aggregates = {pc: aggregate_province(rs) for pc, rs in province_valid.items()}
+    province_aggregates   = {pc: aggregate_province(rs) for pc, rs in province_valid.items()}
     department_aggregates = {dc: aggregate_province(rs) for dc, rs in department_valid.items()}
 
     # Step 3: synthesize skipped districts
@@ -177,18 +202,18 @@ def run_simulation(
         if r is not None:
             continue
         uid = str(d["ubigeo_distrito"])
-        prov_agg = province_aggregates.get(uid[:4])
-        dept_agg = department_aggregates.get(uid[:2])
-        fallback_agg = prov_agg or dept_agg
+        prov_agg       = province_aggregates.get(uid[:4])
+        dept_agg       = department_aggregates.get(uid[:2])
+        fallback_agg   = prov_agg or dept_agg
         fallback_label = "provincia" if prov_agg else ("departamento" if dept_agg else None)
-        total_votes = d.get("pendientesJee", 0) * votes_per_acta
-        synthetic = make_synthetic_result(fallback_agg, total_votes)
+        total_votes    = d.get("pendientesJee", 0) * votes_per_acta
+        synthetic      = make_synthetic_result(fallback_agg, total_votes)
         row = {
-            "Ubigeo": uid,
-            "Distrito": ubigeo_names.get(uid, "—"),
-            "Motivo": skip_reason(d),
-            "Distribución usada": fallback_label or "—",
-            "Votos est. (actas)": total_votes,
+            "Ubigeo":                uid,
+            "Distrito":              ubigeo_names.get(uid, "—"),
+            "Motivo":                skip_reason(d),
+            "Distribución usada":    fallback_label or "—",
+            "Votos est. (actas)":    total_votes,
         }
         if synthetic is not None:
             synthetic_results.append(synthetic)
@@ -212,9 +237,9 @@ def run_simulation(
             "department": ("Departamento", lambda uid: ubigeo_to_dept.get(uid, uid)),
         }[geo_grouping]
 
-        top_candidates = [c.name for c in final_agg.candidates[:5]]
-        synthetic_iter = iter(synthetic_results)
-        district_pairs = [
+        top_candidates  = [c.name for c in final_agg.candidates[:5]]
+        synthetic_iter  = iter(synthetic_results)
+        district_pairs  = [
             (str(d["ubigeo_distrito"]), r if r is not None else next(synthetic_iter, None))
             for d, r in zip(data, results)
         ]
@@ -226,14 +251,14 @@ def run_simulation(
 
         breakdown_rows = []
         for geo_name, group_results in sorted(groups.items()):
-            grp = aggregate_province(group_results)
+            grp      = aggregate_province(group_results)
             cand_map = {c.name: c for c in grp.candidates}
             row = {
-                geo_label: geo_name,
-                "% contabilizado": grp.pct_counted,
-                "Votos contabilizados": grp.votes_counted,
-                "Total votos": grp.total_votes,
-                "Ganador proyectado": grp.projected_winner.name,
+                geo_label:               geo_name,
+                "% contabilizado":       grp.pct_counted,
+                "Votos contabilizados":  grp.votes_counted,
+                "Total votos":           grp.total_votes,
+                "Ganador proyectado":    grp.projected_winner.name,
             }
             for name in top_candidates:
                 c = cand_map.get(name)
@@ -263,7 +288,7 @@ _run_simulation_cached = st.cache_data(
 st.set_page_config(page_title="ONPE Probabilidad de Victoria", layout="wide")
 st.title("ONPE — Probabilidad de Victoria Electoral")
 
-bundle = load_bundle()
+bundle    = load_bundle()
 ubigeo_names, ubigeo_to_dept, ubigeo_to_prov, hierarchy = load_geo_data()
 null_votes_df = load_null_votes_data(bundle)
 
@@ -274,15 +299,11 @@ active_tab = st.sidebar.radio(
 )
 st.sidebar.markdown("---")
 
-# Helper: detect perú sololista, extranjero only, or mixed
-def is_peruvian_dept(dept_name):
-    return any(
-        dept_name.upper() == pdname or dept_name.title() == pdname
-        for pdname in PERU_DEPARTMENTS
-    )
+# Pre-compute department lists once
+all_depts      = sorted(hierarchy.keys())
+peruvian_depts = [d for d in all_depts if     is_peruvian_dept(d)]
+foreign_depts  = [d for d in all_depts if not is_peruvian_dept(d)]
 
-extranjero_depts = [d for d in hierarchy.keys() if not is_peruvian_dept(d)]
-peruvian_deps   = [d for d in sorted(hierarchy.keys()) if is_peruvian_dept(d)]
 
 # ── Tab: Monte Carlo ─────────────────────────────────────────────────────────
 
@@ -293,130 +314,114 @@ if active_tab == "Simulación Monte Carlo":
     votes_per_acta   = st.sidebar.number_input(
         "Votos por acta",
         min_value=150, max_value=300, value=220, step=1,
-        help="Número estimado de votos por acta. Se usa para calcular votos pendientes en distritos sin datos.",
+        help="Número estimado de votos por acta.",
     )
 
-    col_todos, col_dep, col_prov, col_dist = st.columns([2, 3, 3, 3])
+    col_amb, col_dep, col_prov, col_dist = st.columns([2, 3, 3, 3])
 
-    # NUEVO SELECTOR de TODOS
-    with col_todos:
-        todos_choice = st.selectbox(
+    # ── Ámbito ──────────────────────────────────────────────────────────────
+    with col_amb:
+        ambito = st.selectbox(
             "Ámbito",
-            [
-                TODOS_OPTS["PERU_Y_EXTRANJERO"],
-                TODOS_OPTS["PERU_SOLO"],
-                TODOS_OPTS["EXTRANJERO_SOLO"],
-            ],
-            help="Elija si desea simular votos nacionales, solo Perú, o solo extranjero.",
-            key="todos_choice"
+            AMBITO_OPTIONS,
+            help="Filtra los departamentos disponibles.",
+            key="ambito_sel",
         )
 
+    # ── Departamento (filtered by Ámbito) ────────────────────────────────────
     with col_dep:
-        # La lista de departamentos depende de todos_choice
-        if todos_choice == TODOS_OPTS["PERU_Y_EXTRANJERO"]:
-            available_deps = sorted(hierarchy.keys())
-        elif todos_choice == TODOS_OPTS["PERU_SOLO"]:
-            available_deps = peruvian_deps
-        elif todos_choice == TODOS_OPTS["EXTRANJERO_SOLO"]:
-            available_deps = sorted(extranjero_depts)
-        else:
-            available_deps = sorted(hierarchy.keys())
+        if ambito == AMBITO_PERU:
+            available_depts = peruvian_depts
+        elif ambito == AMBITO_EXTRANJERO:
+            available_depts = foreign_depts
+        else:  # AMBITO_TODOS
+            available_depts = all_depts
+
         dept_sel = st.selectbox(
             "Departamento",
-            [TODOS] + available_deps,
-            help={
-                TODOS_OPTS["PERU_Y_EXTRANJERO"]:  "Departamentos ubicados en Perú y agrupaciones tipo extranjero.",
-                TODOS_OPTS["PERU_SOLO"]:          "Solo departamentos ubicados en Perú.",
-                TODOS_OPTS["EXTRANJERO_SOLO"]:    "Solo agrupaciones o zonas del extranjero.",
-            }[todos_choice],
-            key="dept_sel"
+            [ALL_SENTINEL] + available_depts,
+            key="dept_sel",
         )
 
+    # ── Provincia ────────────────────────────────────────────────────────────
     with col_prov:
-        if dept_sel == TODOS:
-            st.selectbox("Provincia", [TODOS], disabled=True, key="prov_sel_disabled")
-            prov_sel = TODOS
+        if dept_sel == ALL_SENTINEL:
+            st.selectbox("Provincia", [ALL_SENTINEL], disabled=True, key="prov_sel_disabled")
+            prov_sel = ALL_SENTINEL
         else:
-            prov_sel = st.selectbox("Provincia", [TODOS] + sorted(hierarchy[dept_sel].keys()), key="prov_sel")
+            prov_sel = st.selectbox(
+                "Provincia",
+                [ALL_SENTINEL] + sorted(hierarchy[dept_sel].keys()),
+                key="prov_sel",
+            )
 
+    # ── Distrito ─────────────────────────────────────────────────────────────
     with col_dist:
-        if prov_sel == TODOS:
-            st.selectbox("Distrito", [TODOS], disabled=True, key="dist_sel_disabled")
-            dist_sel, dist_ubigeo = TODOS, None
+        if prov_sel == ALL_SENTINEL:
+            st.selectbox("Distrito", [ALL_SENTINEL], disabled=True, key="dist_sel_disabled")
+            dist_sel      = ALL_SENTINEL
+            dist_ubigeo   = None
         else:
-            pairs = hierarchy[dept_sel][prov_sel]
-            dist_sel = st.selectbox("Distrito", [TODOS] + [name for name, _ in pairs], key="dist_sel")
+            pairs    = hierarchy[dept_sel][prov_sel]
+            dist_sel = st.selectbox(
+                "Distrito",
+                [ALL_SENTINEL] + [name for name, _ in pairs],
+                key="dist_sel",
+            )
             dist_ubigeo = next((uid for name, uid in pairs if name == dist_sel), None)
 
+    # ── Run ──────────────────────────────────────────────────────────────────
     if st.button("Ejecutar simulación", key="run_sim"):
-        # Resolve ubigeos from selection based on TODOS selector
-        if dist_sel != TODOS and dist_ubigeo:
+
+        # Resolve ubigeo IDs from the current selection
+        if dist_sel != ALL_SENTINEL and dist_ubigeo:
             ids = [dist_ubigeo]
-        elif prov_sel != TODOS:
+        elif prov_sel != ALL_SENTINEL:
             ids = [uid for _, uid in hierarchy[dept_sel][prov_sel]]
-        elif dept_sel != TODOS:
+        elif dept_sel != ALL_SENTINEL:
             ids = [uid for pairs in hierarchy[dept_sel].values() for _, uid in pairs]
         else:
-            # Todos a nivel nacional, perú, o extranjero según todos_choice
-            if todos_choice == TODOS_OPTS["PERU_Y_EXTRANJERO"]:
-                # Nacional: todo el hierarchy
-                ids = [
-                    uid
-                    for dept_name, dept_provs in hierarchy.items()
-                    for prov_name, pairs in dept_provs.items()
-                    for _, uid in pairs
-                ]
-            elif todos_choice == TODOS_OPTS["PERU_SOLO"]:
-                # Perú solo, solo departamentos peruanos
-                ids = [
-                    uid
-                    for dept_name, dept_provs in hierarchy.items()
-                    if dept_name in peruvian_deps
-                    for prov_name, pairs in dept_provs.items()
-                    for _, uid in pairs
-                ]
-            elif todos_choice == TODOS_OPTS["EXTRANJERO_SOLO"]:
-                # Extranjero solo, solo agrupaciones no-perú
-                ids = [
-                    uid
-                    for dept_name, dept_provs in hierarchy.items()
-                    if dept_name in extranjero_depts
-                    for prov_name, pairs in dept_provs.items()
-                    for _, uid in pairs
-                ]
+            # Top-level: depends on Ámbito
+            if ambito == AMBITO_PERU:
+                source_depts = peruvian_depts
+            elif ambito == AMBITO_EXTRANJERO:
+                source_depts = foreign_depts
             else:
-                # Backcompatible national
-                ids = [
-                    uid
-                    for dept_name, dept_provs in hierarchy.items()
-                    for prov_name, pairs in dept_provs.items()
-                    for _, uid in pairs
-                ]
+                source_depts = all_depts
+
+            ids = [
+                uid
+                for dept_name in source_depts
+                for pairs in hierarchy[dept_name].values()
+                for _, uid in pairs
+            ]
 
         if not ids:
             st.error("No se encontraron ubigeos para esta selección.")
             st.stop()
 
-        # ZONE LABEL REFLECTS SCOPE
-        if dept_sel != TODOS:
+        # Human-readable zone label for the results header
+        if dist_sel != ALL_SENTINEL:
+            zone_label = dist_sel
+        elif prov_sel != ALL_SENTINEL:
+            zone_label = f"{prov_sel} — {dept_sel}"
+        elif dept_sel != ALL_SENTINEL:
             zone_label = dept_sel
-        elif todos_choice == TODOS_OPTS["PERU_Y_EXTRANJERO"]:
-            zone_label = "Nacional (Perú+Extranjero)"
-        elif todos_choice == TODOS_OPTS["PERU_SOLO"]:
-            zone_label = "Sólo Perú"
-        elif todos_choice == TODOS_OPTS["EXTRANJERO_SOLO"]:
-            zone_label = "Extranjero"
         else:
-            zone_label = "Nacional"
+            zone_label = {
+                AMBITO_PERU:       "Sólo Perú",
+                AMBITO_EXTRANJERO: "Extranjero",
+                AMBITO_TODOS:      "Nacional (Perú + Extranjero)",
+            }[ambito]
 
         geo_grouping = (
-            "none"       if dist_sel != TODOS else
-            "district"   if prov_sel != TODOS else
-            "province"   if dept_sel != TODOS else
+            "none"       if dist_sel != ALL_SENTINEL else
+            "district"   if prov_sel != ALL_SENTINEL else
+            "province"   if dept_sel != ALL_SENTINEL else
             "department"
         )
 
-        sim_fn = _run_simulation_cached if dist_sel == TODOS else run_simulation
+        sim_fn = _run_simulation_cached if dist_sel == ALL_SENTINEL else run_simulation
         with st.spinner("Ejecutando simulación Monte Carlo…"):
             result, estimated, truly_skipped, fetch_failures, breakdown = sim_fn(
                 ids=tuple(ids),
@@ -424,12 +429,15 @@ if active_tab == "Simulación Monte Carlo":
                 confidence_level=confidence_level,
                 prior=prior_option,
                 votes_per_acta=int(votes_per_acta),
-                compute_breakdown=dist_sel == TODOS and int(n_simulations) <= 1000,
+                compute_breakdown=dist_sel == ALL_SENTINEL and int(n_simulations) <= 1000,
                 geo_grouping=geo_grouping,
             )
 
         if result is None:
-            st.error("Sin datos utilizables — todos los distritos fueron omitidos y no se pudo inferir una distribución provincial.")
+            st.error(
+                "Sin datos utilizables — todos los distritos fueron omitidos "
+                "y no se pudo inferir una distribución provincial."
+            )
             st.stop()
 
         ci_pct = int(result.confidence_level * 100)
@@ -443,7 +451,12 @@ if active_tab == "Simulación Monte Carlo":
         c4.metric("% contabilizado",      f"{result.pct_counted:.1%}")
 
         # Candidate table
-        pct_cols = ["Porcentaje actual", "Porcentaje proyectado", f"IC inferior ({ci_pct}%)", f"IC superior ({ci_pct}%)"]
+        pct_cols = [
+            "Porcentaje actual",
+            "Porcentaje proyectado",
+            f"IC inferior ({ci_pct}%)",
+            f"IC superior ({ci_pct}%)",
+        ]
         int_cols = ["Votos contabilizados", "Votos proyectados", "Votos adicionales"]
 
         DISPLAY_CANDIDATES = {
@@ -457,9 +470,7 @@ if active_tab == "Simulación Monte Carlo":
         for c in result.candidates:
             if c.name not in DISPLAY_CANDIDATES:
                 continue
-
             proj_votes = int(c.projected_share * result.total_votes)
-
             rows.append({
                 "Candidato":                c.name,
                 "Votos contabilizados":     c.votes_counted,
@@ -485,13 +496,16 @@ if active_tab == "Simulación Monte Carlo":
             f"porcentaje proyectado {winner.projected_share:.2%}"
         )
 
-        # ── Desglose geográfico ──────────────────────────────────────────────────
+        # ── Desglose geográfico ──────────────────────────────────────────────
         if breakdown:
             geo_label, breakdown_rows = breakdown
             with st.expander(f"Desglose por {geo_label.lower()} ({len(breakdown_rows)})"):
-                bdf = pd.DataFrame(breakdown_rows).set_index(geo_label)
+                bdf   = pd.DataFrame(breakdown_rows).set_index(geo_label)
                 pct_b = ["% contabilizado"]
-                int_b = ["Votos contabilizados", "Total votos"] + [c for c in bdf.columns if "proy." in c or "adic." in c]
+                int_b = (
+                    ["Votos contabilizados", "Total votos"]
+                    + [c for c in bdf.columns if "proy." in c or "adic." in c]
+                )
                 st.dataframe(
                     bdf.style
                         .format({col: "{:.1%}" for col in pct_b})
@@ -500,46 +514,67 @@ if active_tab == "Simulación Monte Carlo":
                 )
 
         if estimated:
-            with st.expander(f"Distritos estimados con distribución provincial ({len(estimated)})"):
+            with st.expander(
+                f"Distritos estimados con distribución provincial ({len(estimated)})"
+            ):
                 st.write(
                     "Estos distritos no tenían votos contabilizados. "
                     "Sus totales de votos fueron estimados con `votasRestantesEstimadoConActas` "
-                    "y su distribución fue inferida de los distritos válidos de la misma provincia o departamento."
+                    "y su distribución fue inferida de los distritos válidos de la misma "
+                    "provincia o departamento."
                 )
                 st.dataframe(pd.DataFrame(estimated), use_container_width=True, hide_index=True)
 
         if truly_skipped:
-            with st.expander(f"Distritos excluidos completamente ({len(truly_skipped)} — sin datos provinciales disponibles)"):
+            with st.expander(
+                f"Distritos excluidos completamente "
+                f"({len(truly_skipped)} — sin datos provinciales disponibles)"
+            ):
                 st.write(
-                    "Estos distritos no tenían datos válidos ni agregado provincial del cual inferir, "
-                    "por lo que fueron excluidos de la simulación."
+                    "Estos distritos no tenían datos válidos ni agregado provincial del cual "
+                    "inferir, por lo que fueron excluidos de la simulación."
                 )
-                st.dataframe(pd.DataFrame(truly_skipped), use_container_width=True, hide_index=True)
+                st.dataframe(
+                    pd.DataFrame(truly_skipped), use_container_width=True, hide_index=True
+                )
 
         if fetch_failures:
-            with st.expander(f"Distritos no encontrados en el bundle ({len(fetch_failures)})"):
-                st.write("Estos distritos no fueron encontrados en el bundle de datos y fueron excluidos.")
-                st.dataframe(pd.DataFrame(fetch_failures), use_container_width=True, hide_index=True)
+            with st.expander(
+                f"Distritos no encontrados en el bundle ({len(fetch_failures)})"
+            ):
+                st.write(
+                    "Estos distritos no fueron encontrados en el bundle de datos y fueron excluidos."
+                )
+                st.dataframe(
+                    pd.DataFrame(fetch_failures), use_container_width=True, hide_index=True
+                )
+
 
 # ── Tab: Serie de Tiempo ─────────────────────────────────────────────────────
 
 if active_tab == "Serie de Tiempo":
     if not os.path.exists(TIMESERIES_FILE):
-        st.info("No hay datos de serie de tiempo. Ejecuta `run_simulation.py --date '...'` para generar snapshots.")
+        st.info(
+            "No hay datos de serie de tiempo. "
+            "Ejecuta `run_simulation.py --date '...'` para generar snapshots."
+        )
         st.stop()
 
-    ts_df = pd.read_csv(TIMESERIES_FILE, parse_dates=["timestamp"])
+    ts_df          = pd.read_csv(TIMESERIES_FILE, parse_dates=["timestamp"])
     all_candidates = sorted(ts_df["candidate"].unique())
     selected = st.multiselect(
         "Candidatos",
         options=all_candidates,
-        default=[c for c in all_candidates if any(k in c for k in ("FUJIMORI", "SANCHEZ", "LÓPEZ ALIAGA", "LOPEZ ALIAGA"))],
+        default=[
+            c for c in all_candidates
+            if any(k in c for k in ("FUJIMORI", "SANCHEZ", "LÓPEZ ALIAGA", "LOPEZ ALIAGA"))
+        ],
     )
     filtered_ts = ts_df[ts_df["candidate"].isin(selected)] if selected else ts_df
 
     def ts_line_chart(data: pd.DataFrame, y_field: str, y_title: str) -> alt.VConcatChart:
-        brush = alt.selection_interval(encodings=["x"])
-        color = alt.Color("candidate:N", title="Candidato")
+        brush  = alt.selection_interval(encodings=["x"])
+        color  = alt.Color("candidate:N", title="Candidato")
         x_axis = alt.Axis(format="%d/%m %H:%M")
 
         detail = (
@@ -551,9 +586,9 @@ if active_tab == "Serie de Tiempo":
                 y=alt.Y(f"{y_field}:Q", title=y_title, scale=alt.Scale(zero=False)),
                 color=color,
                 tooltip=[
-                    alt.Tooltip("timestamp:T", title="Fecha/Hora", format="%Y-%m-%d %H:%M"),
-                    alt.Tooltip("candidate:N", title="Candidato"),
-                    alt.Tooltip(f"{y_field}:Q", title=y_title, format=","),
+                    alt.Tooltip("timestamp:T",    title="Fecha/Hora", format="%Y-%m-%d %H:%M"),
+                    alt.Tooltip("candidate:N",    title="Candidato"),
+                    alt.Tooltip(f"{y_field}:Q",   title=y_title, format=","),
                 ],
             )
             .properties(height=300)
@@ -574,13 +609,19 @@ if active_tab == "Serie de Tiempo":
         return detail & overview
 
     st.subheader("Votos proyectados a lo largo del tiempo")
-    st.altair_chart(ts_line_chart(filtered_ts, "projected_votes", "Votos proyectados"), use_container_width=True)
+    st.altair_chart(
+        ts_line_chart(filtered_ts, "projected_votes", "Votos proyectados"),
+        use_container_width=True,
+    )
 
     st.subheader("Votos contabilizados a lo largo del tiempo")
-    st.altair_chart(ts_line_chart(filtered_ts, "votes_counted", "Votos contabilizados"), use_container_width=True)
+    st.altair_chart(
+        ts_line_chart(filtered_ts, "votes_counted", "Votos contabilizados"),
+        use_container_width=True,
+    )
 
     st.subheader("% de votos evaluados a lo largo del tiempo")
-    pct_df = ts_df.drop_duplicates("timestamp")[["timestamp", "pct_counted"]].copy()
+    pct_df              = ts_df.drop_duplicates("timestamp")[["timestamp", "pct_counted"]].copy()
     pct_df["pct_counted"] *= 100
     pct_brush = alt.selection_interval(encodings=["x"])
 
@@ -592,7 +633,7 @@ if active_tab == "Serie de Tiempo":
             x=alt.X("timestamp:T", title="Fecha/Hora", axis=alt.Axis(format="%d/%m %H:%M")),
             y=alt.Y("pct_counted:Q", title="% contabilizado", scale=alt.Scale(zero=False)),
             tooltip=[
-                alt.Tooltip("timestamp:T", title="Fecha/Hora", format="%Y-%m-%d %H:%M"),
+                alt.Tooltip("timestamp:T",   title="Fecha/Hora", format="%Y-%m-%d %H:%M"),
                 alt.Tooltip("pct_counted:Q", title="% contabilizado", format=".2f"),
             ],
         )
