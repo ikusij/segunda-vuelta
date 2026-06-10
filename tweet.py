@@ -35,19 +35,5 @@ def create_tweet(fecha, fp_cont, jp_cont, fp_est, jp_est):
     text = TEMPLATE.format(fecha, fp_cont, jp_cont, fp_est, jp_est)
     payload = { "text": text }
     print(text)
-
+    
     print(requests.post(URL, json=payload, headers={ "Content-Type": "application/json" }, auth=AUTH))
-
-🗳️ PERÚ 2026 | Resultados en vivo
-
-ACTUALIZADO: 2026-06-10 08:08:00
-
-CONTADO
-🟠 FUERZA POPULAR —— 8,974,870
-🟢 JP — 8,995,601
-
-ESTIMADO
-🟠 FUERZA POPULAR —— 9,272,987
-🟢 JP — 9,203,809
-
-#EleccionesPeru #2daVuelta
