@@ -32,6 +32,9 @@ ESTIMADO
 
 def create_tweet(fecha, fp_cont, jp_cont, fp_est, jp_est):
 
-    payload = { "text": TEMPLATE.format(fecha, fp_cont, jp_cont, fp_est, jp_est) }
+    text = TEMPLATE.format(fecha, fp_cont, jp_cont, fp_est, jp_est)
+    payload = { "text": text }
+    print(text)
+    
     print(requests.post(URL, json=payload, headers={ "Content-Type": "application/json" }, auth=AUTH))
 
