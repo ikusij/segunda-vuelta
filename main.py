@@ -69,6 +69,4 @@ if __name__ == "__main__":
                 print(f"Git error: {e}")
             
             prev_timestamp = timestamp
-
-        sleep(1200)
         
